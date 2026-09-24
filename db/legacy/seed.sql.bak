@@ -1,0 +1,55 @@
+-- ============================================================
+-- EUNIKMODA — Seed inicial
+-- ============================================================
+
+INSERT INTO pipeline_etapas (nombre, orden) VALUES
+  ('Nuevo', 1), ('Pregunta', 2), ('Conversando', 3), ('Interesada', 4),
+  ('Reservado', 5), ('Pendiente Pago', 6), ('Pagado', 7), ('Despachado', 8),
+  ('Entregado', 9), ('Finalizado', 10), ('Perdido', 11);
+
+-- Tallas: letra + numéricas (pantalones/jeans) + numéricas de calzado (Chile usa numeración europea)
+INSERT INTO tallas (nombre, orden) VALUES
+  ('XS', 1), ('S', 2), ('M', 3), ('L', 4), ('XL', 5), ('XXL', 6), ('Única', 7),
+  ('34', 10), ('36', 11), ('38', 12), ('40', 13), ('42', 14), ('44', 15),
+  ('35', 20), ('36 ', 21), ('37', 22), ('38 ', 23), ('39', 24), ('40 ', 25);
+
+INSERT INTO temporadas (nombre) VALUES ('Verano'), ('Otoño'), ('Invierno'), ('Primavera');
+
+INSERT INTO categorias (nombre, slug, orden) VALUES
+  ('Abrigos', 'abrigos', 1), ('Chaquetas', 'chaquetas', 2), ('Vestidos', 'vestidos', 3),
+  ('Blazers', 'blazers', 4), ('Faldas', 'faldas', 5), ('Jeans', 'jeans', 6),
+  ('Pantalones', 'pantalones', 7), ('Poleras', 'poleras', 8), ('Blusas', 'blusas', 9),
+  ('Sweaters', 'sweaters', 10), ('Accesorios', 'accesorios', 11), ('Zapatos', 'zapatos', 12);
+
+INSERT INTO origenes (nombre, tipo) VALUES
+  ('Chile', 'pais'), ('Estados Unidos', 'pais'), ('Europa', 'pais'),
+  ('Importadora', 'importadora'), ('Cliente', 'cliente'),
+  ('Donación', 'donacion'), ('Compra directa', 'compra_directa');
+
+INSERT INTO colecciones (nombre, slug, descripcion) VALUES
+  ('Nueva colección', 'nueva-coleccion', 'Lo último en llegar a la boutique.'),
+  ('Vintage', 'vintage', 'Piezas de otra época, con carácter propio.'),
+  ('Minimalista', 'minimalista', 'Líneas limpias, básicos con caída perfecta.'),
+  ('Oficina', 'oficina', 'Estructura y elegancia para el día a día.'),
+  ('Casual', 'casual', 'Comodidad sin perder identidad.'),
+  ('Invierno', 'invierno', 'Abrigo con actitud.');
+
+INSERT INTO tags (nombre, slug) VALUES
+  ('Minimalista', 'minimalista'), ('Oversize', 'oversize'), ('Core', 'core'),
+  ('Coquette', 'coquette'), ('Vintage', 'vintage'), ('Office', 'office'),
+  ('Fiesta', 'fiesta'), ('Casual', 'casual'), ('Premium', 'premium');
+
+-- Colores base (antes faltaba poblar esta tabla)
+INSERT INTO colores (nombre, hex) VALUES
+  ('Negro carbón', '#191817'), ('Marfil', '#F6F1E9'), ('Terracota', '#A64B35'),
+  ('Rosa arcilla', '#D8AAA0'), ('Verde salvia', '#687266'), ('Camel', '#C19A6B'),
+  ('Azul medio', '#4A6FA5'), ('Azul oscuro', '#1E2A47'), ('Café', '#6F4E37'),
+  ('Blanco', '#FFFFFF'), ('Beige', '#E8DCC8'), ('Gris', '#8C8C8C');
+
+-- Materiales base (antes faltaba poblar esta tabla)
+INSERT INTO materiales (nombre) VALUES
+  ('Algodón'), ('Lino'), ('Lana'), ('Cuero'), ('Denim'), ('Poliéster'), ('Viscosa'), ('Seda');
+
+-- Password temporal: "EunikModa2026!" (cambiar en el primer login)
+INSERT INTO usuarios (nombre, email, password_hash, rol) VALUES
+  ('Admin EUNIKMODA', 'admin@eunikmoda.cl', '$2b$10$PLACEHOLDER_REEMPLAZAR_AL_CORRER_SEED', 'admin');

@@ -1,0 +1,320 @@
+-- ============================================================
+-- EUNIKMODA — Schema MySQL 8
+-- Convención: snake_case, InnoDB, utf8mb4, timestamps en UTC
+-- ============================================================
+
+SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
+
+CREATE TABLE usuarios (
+  id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nombre        VARCHAR(120)  NOT NULL,
+  email         VARCHAR(160)  NOT NULL,
+  password_hash VARCHAR(255)  NOT NULL,
+  rol           ENUM('admin','editor','cliente') NOT NULL DEFAULT 'editor',
+  activo        BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_usuarios_email (email)
+) ENGINE=InnoDB;
+
+CREATE TABLE categorias (
+  id      BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nombre  VARCHAR(100) NOT NULL,
+  slug    VARCHAR(120) NOT NULL,
+  activo  BOOLEAN NOT NULL DEFAULT TRUE,
+  orden   INT NOT NULL DEFAULT 0,
+  UNIQUE KEY uq_categorias_slug (slug)
+) ENGINE=InnoDB;
+
+CREATE TABLE subcategorias (
+  id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  categoria_id BIGINT UNSIGNED NOT NULL,
+  nombre       VARCHAR(100) NOT NULL,
+  slug         VARCHAR(120) NOT NULL,
+  activo       BOOLEAN NOT NULL DEFAULT TRUE,
+  UNIQUE KEY uq_subcategorias_slug (slug),
+  CONSTRAINT fk_subcategorias_categoria FOREIGN KEY (categoria_id) REFERENCES categorias(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE marcas (
+  id      BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nombre  VARCHAR(100) NOT NULL,
+  slug    VARCHAR(120) NOT NULL,
+  activo  BOOLEAN NOT NULL DEFAULT TRUE,
+  UNIQUE KEY uq_marcas_slug (slug)
+) ENGINE=InnoDB;
+
+CREATE TABLE tallas (
+  id      BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nombre  VARCHAR(20) NOT NULL,
+  orden   INT NOT NULL DEFAULT 0,
+  UNIQUE KEY uq_tallas_nombre (nombre)
+) ENGINE=InnoDB;
+
+CREATE TABLE colores (
+  id      BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nombre  VARCHAR(60) NOT NULL,
+  hex     CHAR(7) NULL,
+  UNIQUE KEY uq_colores_nombre (nombre)
+) ENGINE=InnoDB;
+
+CREATE TABLE materiales (
+  id      BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nombre  VARCHAR(60) NOT NULL,
+  UNIQUE KEY uq_materiales_nombre (nombre)
+) ENGINE=InnoDB;
+
+CREATE TABLE temporadas (
+  id      BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nombre  ENUM('Verano','Otoño','Invierno','Primavera') NOT NULL,
+  UNIQUE KEY uq_temporadas_nombre (nombre)
+) ENGINE=InnoDB;
+
+CREATE TABLE colecciones (
+  id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nombre       VARCHAR(100) NOT NULL,
+  slug         VARCHAR(120) NOT NULL,
+  descripcion  VARCHAR(255) NULL,
+  activo       BOOLEAN NOT NULL DEFAULT TRUE,
+  UNIQUE KEY uq_colecciones_slug (slug)
+) ENGINE=InnoDB;
+
+CREATE TABLE tags (
+  id      BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nombre  VARCHAR(60) NOT NULL,
+  slug    VARCHAR(80) NOT NULL,
+  UNIQUE KEY uq_tags_slug (slug)
+) ENGINE=InnoDB;
+
+CREATE TABLE origenes (
+  id      BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nombre  VARCHAR(100) NOT NULL,
+  tipo    ENUM('pais','importadora','cliente','donacion','compra_directa') NOT NULL DEFAULT 'pais',
+  UNIQUE KEY uq_origenes_nombre (nombre)
+) ENGINE=InnoDB;
+
+CREATE TABLE productos (
+  id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  sku                 VARCHAR(30) NOT NULL,
+  nombre              VARCHAR(160) NOT NULL,
+  slug                VARCHAR(200) NOT NULL,
+  descripcion_corta   VARCHAR(255) NULL,
+  descripcion_larga   TEXT NULL,
+
+  precio              DECIMAL(10,2) NOT NULL,
+  precio_anterior     DECIMAL(10,2) NULL,
+  tipo_descuento      ENUM('ninguno','porcentaje','monto_fijo','2x1','3x2') NOT NULL DEFAULT 'ninguno',
+  valor_descuento     DECIMAL(10,2) NULL,
+  precio_final        DECIMAL(10,2) GENERATED ALWAYS AS (
+                        CASE tipo_descuento
+                          WHEN 'porcentaje' THEN ROUND(precio - (precio * valor_descuento / 100), 2)
+                          WHEN 'monto_fijo' THEN ROUND(precio - valor_descuento, 2)
+                          ELSE precio
+                        END
+                      ) STORED,
+
+  categoria_id        BIGINT UNSIGNED NOT NULL,
+  subcategoria_id     BIGINT UNSIGNED NULL,
+  marca_id            BIGINT UNSIGNED NOT NULL,
+  origen_id           BIGINT UNSIGNED NOT NULL,
+  temporada_id        BIGINT UNSIGNED NULL,
+  coleccion_id        BIGINT UNSIGNED NULL,
+  material_principal_id BIGINT UNSIGNED NULL,
+  color_principal_id  BIGINT UNSIGNED NULL,
+
+  estado              ENUM('disponible','reservada','en_negociacion','vendida','agotada','oculta','archivada')
+                        NOT NULL DEFAULT 'disponible',
+  destacado           BOOLEAN NOT NULL DEFAULT FALSE,
+  nuevo               BOOLEAN NOT NULL DEFAULT TRUE,
+  visible             BOOLEAN NOT NULL DEFAULT TRUE,
+
+  peso_kg             DECIMAL(6,3) NULL,
+  pais_fabricacion    VARCHAR(80) NULL,
+  fecha_ingreso       DATE NOT NULL,
+  fecha_venta         DATE NULL,
+  notas_internas      TEXT NULL,
+
+  created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  UNIQUE KEY uq_productos_sku (sku),
+  UNIQUE KEY uq_productos_slug (slug),
+  KEY idx_productos_categoria (categoria_id),
+  KEY idx_productos_marca (marca_id),
+  KEY idx_productos_estado (estado),
+  KEY idx_productos_destacado_visible (destacado, visible),
+  KEY idx_productos_nuevo_visible (nuevo, visible),
+  KEY idx_productos_coleccion (coleccion_id),
+
+  CONSTRAINT fk_productos_categoria FOREIGN KEY (categoria_id) REFERENCES categorias(id),
+  CONSTRAINT fk_productos_subcategoria FOREIGN KEY (subcategoria_id) REFERENCES subcategorias(id) ON DELETE SET NULL,
+  CONSTRAINT fk_productos_marca FOREIGN KEY (marca_id) REFERENCES marcas(id),
+  CONSTRAINT fk_productos_origen FOREIGN KEY (origen_id) REFERENCES origenes(id),
+  CONSTRAINT fk_productos_temporada FOREIGN KEY (temporada_id) REFERENCES temporadas(id) ON DELETE SET NULL,
+  CONSTRAINT fk_productos_coleccion FOREIGN KEY (coleccion_id) REFERENCES colecciones(id) ON DELETE SET NULL,
+  CONSTRAINT fk_productos_material FOREIGN KEY (material_principal_id) REFERENCES materiales(id) ON DELETE SET NULL,
+  CONSTRAINT fk_productos_color FOREIGN KEY (color_principal_id) REFERENCES colores(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE producto_imagenes (
+  id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  producto_id   BIGINT UNSIGNED NOT NULL,
+  url           VARCHAR(500) NOT NULL,
+  orden         INT NOT NULL DEFAULT 0,
+  es_principal  BOOLEAN NOT NULL DEFAULT FALSE,
+  KEY idx_producto_imagenes_producto (producto_id),
+  CONSTRAINT fk_producto_imagenes_producto FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE producto_tallas (
+  producto_id BIGINT UNSIGNED NOT NULL,
+  talla_id    BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (producto_id, talla_id),
+  CONSTRAINT fk_pt_producto FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE CASCADE,
+  CONSTRAINT fk_pt_talla FOREIGN KEY (talla_id) REFERENCES tallas(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE producto_colores (
+  producto_id BIGINT UNSIGNED NOT NULL,
+  color_id    BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (producto_id, color_id),
+  CONSTRAINT fk_pc_producto FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE CASCADE,
+  CONSTRAINT fk_pc_color FOREIGN KEY (color_id) REFERENCES colores(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE producto_materiales (
+  producto_id  BIGINT UNSIGNED NOT NULL,
+  material_id  BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (producto_id, material_id),
+  CONSTRAINT fk_pm_producto FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE CASCADE,
+  CONSTRAINT fk_pm_material FOREIGN KEY (material_id) REFERENCES materiales(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE producto_tags (
+  producto_id BIGINT UNSIGNED NOT NULL,
+  tag_id      BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (producto_id, tag_id),
+  CONSTRAINT fk_ptag_producto FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ptag_tag FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE clientes (
+  id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nombre            VARCHAR(80) NOT NULL,
+  apellido          VARCHAR(80) NULL,
+  instagram         VARCHAR(80) NULL,
+  facebook          VARCHAR(120) NULL,
+  telefono          VARCHAR(30) NULL,
+  email             VARCHAR(160) NULL,
+  ciudad            VARCHAR(80) NULL,
+  comuna            VARCHAR(80) NULL,
+  cumpleanos        DATE NULL,
+  observaciones     TEXT NULL,
+  fecha_creacion    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ultimo_contacto   DATETIME NULL,
+  cliente_frecuente BOOLEAN NOT NULL DEFAULT FALSE,
+  KEY idx_clientes_email (email),
+  KEY idx_clientes_telefono (telefono)
+) ENGINE=InnoDB;
+
+CREATE TABLE intereses (
+  id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  cliente_id   BIGINT UNSIGNED NOT NULL,
+  producto_id  BIGINT UNSIGNED NOT NULL,
+  estado       ENUM('consulto','probo','reservo','compro','no_respondio','no_le_quedo','esperando_stock')
+                 NOT NULL DEFAULT 'consulto',
+  fecha        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  notas        VARCHAR(255) NULL,
+  KEY idx_intereses_cliente (cliente_id),
+  KEY idx_intereses_producto (producto_id),
+  KEY idx_intereses_estado (estado),
+  CONSTRAINT fk_intereses_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE,
+  CONSTRAINT fk_intereses_producto FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE favoritos (
+  id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  cliente_id   BIGINT UNSIGNED NOT NULL,
+  producto_id  BIGINT UNSIGNED NOT NULL,
+  fecha        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_favoritos_cliente_producto (cliente_id, producto_id),
+  CONSTRAINT fk_favoritos_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE,
+  CONSTRAINT fk_favoritos_producto FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE historial_cliente (
+  id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  cliente_id   BIGINT UNSIGNED NOT NULL,
+  usuario_id   BIGINT UNSIGNED NULL,
+  tipo         VARCHAR(50) NOT NULL,
+  descripcion  VARCHAR(500) NOT NULL,
+  fecha        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_historial_cliente (cliente_id),
+  CONSTRAINT fk_historial_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE,
+  CONSTRAINT fk_historial_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE pipeline_etapas (
+  id      BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nombre  VARCHAR(40) NOT NULL,
+  orden   INT NOT NULL,
+  UNIQUE KEY uq_pipeline_etapas_nombre (nombre)
+) ENGINE=InnoDB;
+
+CREATE TABLE pipeline_movimientos (
+  id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  cliente_id   BIGINT UNSIGNED NOT NULL,
+  etapa_id     BIGINT UNSIGNED NOT NULL,
+  producto_id  BIGINT UNSIGNED NULL,
+  usuario_id   BIGINT UNSIGNED NULL,
+  fecha        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  notas        VARCHAR(255) NULL,
+  KEY idx_pipeline_mov_cliente (cliente_id),
+  KEY idx_pipeline_mov_etapa (etapa_id),
+  CONSTRAINT fk_pipeline_mov_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE,
+  CONSTRAINT fk_pipeline_mov_etapa FOREIGN KEY (etapa_id) REFERENCES pipeline_etapas(id),
+  CONSTRAINT fk_pipeline_mov_producto FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE SET NULL,
+  CONSTRAINT fk_pipeline_mov_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE ventas (
+  id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  cliente_id  BIGINT UNSIGNED NOT NULL,
+  fecha       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  forma_pago  ENUM('efectivo','transferencia','tarjeta','otro') NOT NULL DEFAULT 'transferencia',
+  total       DECIMAL(10,2) NOT NULL DEFAULT 0,
+  notas       VARCHAR(255) NULL,
+  KEY idx_ventas_cliente (cliente_id),
+  KEY idx_ventas_fecha (fecha),
+  CONSTRAINT fk_ventas_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE venta_items (
+  id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  venta_id         BIGINT UNSIGNED NOT NULL,
+  producto_id      BIGINT UNSIGNED NOT NULL,
+  precio_original  DECIMAL(10,2) NOT NULL,
+  precio_vendido   DECIMAL(10,2) NOT NULL,
+  descuento        DECIMAL(10,2) NOT NULL DEFAULT 0,
+  KEY idx_venta_items_venta (venta_id),
+  KEY idx_venta_items_producto (producto_id),
+  CONSTRAINT fk_venta_items_venta FOREIGN KEY (venta_id) REFERENCES ventas(id) ON DELETE CASCADE,
+  CONSTRAINT fk_venta_items_producto FOREIGN KEY (producto_id) REFERENCES productos(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE configuraciones (
+  clave  VARCHAR(80) NOT NULL PRIMARY KEY,
+  valor  TEXT NULL
+) ENGINE=InnoDB;
+
+-- Suscriptores del newsletter (home) — envío manual/batched, nunca automático por producto.
+CREATE TABLE suscriptores (
+  id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  email               VARCHAR(160) NOT NULL,
+  activo              BOOLEAN NOT NULL DEFAULT TRUE,
+  fecha_suscripcion   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_suscriptores_email (email)
+) ENGINE=InnoDB;
+
+SET FOREIGN_KEY_CHECKS = 1;

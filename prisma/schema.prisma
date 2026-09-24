@@ -1,0 +1,509 @@
+// EUNIKMODA — schema Prisma (MySQL 8+)
+// Campos en camelCase; @map/@@map preservan los nombres físicos snake_case
+// de tablas, columnas, índices y FKs que venían de db/legacy/schema.sql.bak.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// ============================================================
+// Enums (en MySQL son columnas ENUM inline; el nombre del enum no existe en la BD)
+// ============================================================
+
+enum Rol {
+  admin
+  editor
+  cliente
+}
+
+enum TipoDescuento {
+  ninguno
+  porcentaje
+  monto_fijo
+  dos_x_uno  @map("2x1")
+  tres_x_dos @map("3x2")
+}
+
+enum EstadoProducto {
+  disponible
+  reservada
+  en_negociacion
+  vendida
+  agotada
+  oculta
+  archivada
+}
+
+enum TemporadaNombre {
+  Verano
+  Otono     @map("Otoño")
+  Invierno
+  Primavera
+}
+
+enum TipoOrigen {
+  pais
+  importadora
+  cliente
+  donacion
+  compra_directa
+}
+
+enum EstadoInteres {
+  consulto
+  probo
+  reservo
+  compro
+  no_respondio
+  no_le_quedo
+  esperando_stock
+}
+
+enum FormaPago {
+  efectivo
+  transferencia
+  tarjeta
+  otro
+}
+
+// ============================================================
+// Usuarios y catálogos
+// ============================================================
+
+model Usuario {
+  id           BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  nombre       String   @db.VarChar(120)
+  email        String   @unique(map: "uq_usuarios_email") @db.VarChar(160)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  rol          Rol      @default(editor)
+  activo       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at") @db.DateTime(0)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  historialClientes   HistorialCliente[]
+  pipelineMovimientos PipelineMovimiento[]
+
+  @@map("usuarios")
+}
+
+model Categoria {
+  id     BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+  nombre String  @db.VarChar(100)
+  slug   String  @unique(map: "uq_categorias_slug") @db.VarChar(120)
+  activo Boolean @default(true)
+  orden  Int     @default(0)
+
+  subcategorias Subcategoria[]
+  productos     Producto[]
+
+  @@map("categorias")
+}
+
+model Subcategoria {
+  id          BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+  categoriaId BigInt  @map("categoria_id") @db.UnsignedBigInt
+  nombre      String  @db.VarChar(100)
+  slug        String  @unique(map: "uq_subcategorias_slug") @db.VarChar(120)
+  activo      Boolean @default(true)
+
+  categoria Categoria  @relation(fields: [categoriaId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_subcategorias_categoria")
+  productos Producto[]
+
+  @@index([categoriaId], map: "fk_subcategorias_categoria")
+  @@map("subcategorias")
+}
+
+model Marca {
+  id     BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+  nombre String  @db.VarChar(100)
+  slug   String  @unique(map: "uq_marcas_slug") @db.VarChar(120)
+  activo Boolean @default(true)
+
+  productos Producto[]
+
+  @@map("marcas")
+}
+
+// Diseño previsto para cuando haya productos de calzado (NO implementado aún):
+// la relación válida es "categoría → tallas ofrecidas", no "talla → tipo".
+// Se agregará una tabla puente categoria_tallas (categoria_id, talla_id) que
+// defina qué tallas se pueden elegir en el formulario de admin según la
+// categoría seleccionada, sin tocar esta tabla. Ver README, sección "Tallas".
+model Talla {
+  id     BigInt @id @default(autoincrement()) @db.UnsignedBigInt
+  nombre String @unique(map: "uq_tallas_nombre") @db.VarChar(20)
+  orden  Int    @default(0)
+
+  productos ProductoTalla[]
+
+  @@map("tallas")
+}
+
+model Color {
+  id     BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+  nombre String  @unique(map: "uq_colores_nombre") @db.VarChar(60)
+  hex    String? @db.Char(7)
+
+  productos          ProductoColor[]
+  productosPrincipal Producto[]
+
+  @@map("colores")
+}
+
+model Material {
+  id     BigInt @id @default(autoincrement()) @db.UnsignedBigInt
+  nombre String @unique(map: "uq_materiales_nombre") @db.VarChar(60)
+
+  productos          ProductoMaterial[]
+  productosPrincipal Producto[]
+
+  @@map("materiales")
+}
+
+model Temporada {
+  id     BigInt          @id @default(autoincrement()) @db.UnsignedBigInt
+  nombre TemporadaNombre @unique(map: "uq_temporadas_nombre")
+
+  productos Producto[]
+
+  @@map("temporadas")
+}
+
+model Coleccion {
+  id          BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+  nombre      String  @db.VarChar(100)
+  slug        String  @unique(map: "uq_colecciones_slug") @db.VarChar(120)
+  descripcion String? @db.VarChar(255)
+  activo      Boolean @default(true)
+
+  productos Producto[]
+
+  @@map("colecciones")
+}
+
+model Tag {
+  id     BigInt @id @default(autoincrement()) @db.UnsignedBigInt
+  nombre String @db.VarChar(60)
+  slug   String @unique(map: "uq_tags_slug") @db.VarChar(80)
+
+  productos ProductoTag[]
+
+  @@map("tags")
+}
+
+model Origen {
+  id     BigInt     @id @default(autoincrement()) @db.UnsignedBigInt
+  nombre String     @unique(map: "uq_origenes_nombre") @db.VarChar(100)
+  tipo   TipoOrigen @default(pais)
+
+  productos Producto[]
+
+  @@map("origenes")
+}
+
+// ============================================================
+// Productos
+// ============================================================
+
+model Producto {
+  id               BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+  sku              String  @unique(map: "uq_productos_sku") @db.VarChar(30)
+  nombre           String  @db.VarChar(160)
+  slug             String  @unique(map: "uq_productos_slug") @db.VarChar(200)
+  descripcionCorta String? @map("descripcion_corta") @db.VarChar(255)
+  descripcionLarga String? @map("descripcion_larga") @db.Text
+
+  precio         Decimal       @db.Decimal(10, 2)
+  precioAnterior Decimal?      @map("precio_anterior") @db.Decimal(10, 2)
+  tipoDescuento  TipoDescuento @default(ninguno) @map("tipo_descuento")
+  valorDescuento Decimal?      @map("valor_descuento") @db.Decimal(10, 2)
+  /// Antes era GENERATED ALWAYS AS (...) STORED. Ahora lo calcula y guarda
+  /// producto.service (calcularPrecioFinal) en cada create/update.
+  precioFinal    Decimal       @map("precio_final") @db.Decimal(10, 2)
+
+  categoriaId         BigInt  @map("categoria_id") @db.UnsignedBigInt
+  subcategoriaId      BigInt? @map("subcategoria_id") @db.UnsignedBigInt
+  marcaId             BigInt  @map("marca_id") @db.UnsignedBigInt
+  origenId            BigInt  @map("origen_id") @db.UnsignedBigInt
+  temporadaId         BigInt? @map("temporada_id") @db.UnsignedBigInt
+  coleccionId         BigInt? @map("coleccion_id") @db.UnsignedBigInt
+  materialPrincipalId BigInt? @map("material_principal_id") @db.UnsignedBigInt
+  colorPrincipalId    BigInt? @map("color_principal_id") @db.UnsignedBigInt
+
+  estado    EstadoProducto @default(disponible)
+  destacado Boolean        @default(false)
+  nuevo     Boolean        @default(true)
+  visible   Boolean        @default(true)
+
+  pesoKg          Decimal?  @map("peso_kg") @db.Decimal(6, 3)
+  paisFabricacion String?   @map("pais_fabricacion") @db.VarChar(80)
+  fechaIngreso    DateTime  @map("fecha_ingreso") @db.Date
+  fechaVenta      DateTime? @map("fecha_venta") @db.Date
+  notasInternas   String?   @map("notas_internas") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.DateTime(0)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  categoria         Categoria     @relation(fields: [categoriaId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_productos_categoria")
+  subcategoria      Subcategoria? @relation(fields: [subcategoriaId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_productos_subcategoria")
+  marca             Marca         @relation(fields: [marcaId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_productos_marca")
+  origen            Origen        @relation(fields: [origenId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_productos_origen")
+  temporada         Temporada?    @relation(fields: [temporadaId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_productos_temporada")
+  coleccion         Coleccion?    @relation(fields: [coleccionId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_productos_coleccion")
+  materialPrincipal Material?     @relation(fields: [materialPrincipalId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_productos_material")
+  colorPrincipal    Color?        @relation(fields: [colorPrincipalId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_productos_color")
+
+  imagenes            ProductoImagen[]
+  tallas              ProductoTalla[]
+  colores             ProductoColor[]
+  materiales          ProductoMaterial[]
+  tags                ProductoTag[]
+  intereses           Interes[]
+  favoritos           Favorito[]
+  pipelineMovimientos PipelineMovimiento[]
+  ventaItems          VentaItem[]
+
+  @@index([categoriaId], map: "idx_productos_categoria")
+  @@index([marcaId], map: "idx_productos_marca")
+  @@index([estado], map: "idx_productos_estado")
+  @@index([destacado, visible], map: "idx_productos_destacado_visible")
+  @@index([nuevo, visible], map: "idx_productos_nuevo_visible")
+  @@index([coleccionId], map: "idx_productos_coleccion")
+  @@index([subcategoriaId], map: "fk_productos_subcategoria")
+  @@index([origenId], map: "fk_productos_origen")
+  @@index([temporadaId], map: "fk_productos_temporada")
+  @@index([materialPrincipalId], map: "fk_productos_material")
+  @@index([colorPrincipalId], map: "fk_productos_color")
+  @@map("productos")
+}
+
+model ProductoImagen {
+  id          BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+  productoId  BigInt  @map("producto_id") @db.UnsignedBigInt
+  url         String  @db.VarChar(500)
+  orden       Int     @default(0)
+  esPrincipal Boolean @default(false) @map("es_principal")
+
+  producto Producto @relation(fields: [productoId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_producto_imagenes_producto")
+
+  @@index([productoId], map: "idx_producto_imagenes_producto")
+  @@map("producto_imagenes")
+}
+
+// Tablas pivote: relaciones muchos-a-muchos explícitas con PK compuesta.
+
+model ProductoTalla {
+  productoId BigInt @map("producto_id") @db.UnsignedBigInt
+  tallaId    BigInt @map("talla_id") @db.UnsignedBigInt
+
+  producto Producto @relation(fields: [productoId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_pt_producto")
+  talla    Talla    @relation(fields: [tallaId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_pt_talla")
+
+  @@id([productoId, tallaId])
+  @@index([tallaId], map: "fk_pt_talla")
+  @@map("producto_tallas")
+}
+
+model ProductoColor {
+  productoId BigInt @map("producto_id") @db.UnsignedBigInt
+  colorId    BigInt @map("color_id") @db.UnsignedBigInt
+
+  producto Producto @relation(fields: [productoId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_pc_producto")
+  color    Color    @relation(fields: [colorId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_pc_color")
+
+  @@id([productoId, colorId])
+  @@index([colorId], map: "fk_pc_color")
+  @@map("producto_colores")
+}
+
+model ProductoMaterial {
+  productoId BigInt @map("producto_id") @db.UnsignedBigInt
+  materialId BigInt @map("material_id") @db.UnsignedBigInt
+
+  producto Producto @relation(fields: [productoId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_pm_producto")
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_pm_material")
+
+  @@id([productoId, materialId])
+  @@index([materialId], map: "fk_pm_material")
+  @@map("producto_materiales")
+}
+
+model ProductoTag {
+  productoId BigInt @map("producto_id") @db.UnsignedBigInt
+  tagId      BigInt @map("tag_id") @db.UnsignedBigInt
+
+  producto Producto @relation(fields: [productoId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_ptag_producto")
+  tag      Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_ptag_tag")
+
+  @@id([productoId, tagId])
+  @@index([tagId], map: "fk_ptag_tag")
+  @@map("producto_tags")
+}
+
+// ============================================================
+// CRM: clientes, intereses, pipeline, ventas
+// ============================================================
+
+model Cliente {
+  id               BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  nombre           String    @db.VarChar(80)
+  apellido         String?   @db.VarChar(80)
+  instagram        String?   @db.VarChar(80)
+  facebook         String?   @db.VarChar(120)
+  telefono         String?   @db.VarChar(30)
+  email            String?   @db.VarChar(160)
+  ciudad           String?   @db.VarChar(80)
+  comuna           String?   @db.VarChar(80)
+  cumpleanos       DateTime? @db.Date
+  observaciones    String?   @db.Text
+  fechaCreacion    DateTime  @default(now()) @map("fecha_creacion") @db.DateTime(0)
+  ultimoContacto   DateTime? @map("ultimo_contacto") @db.DateTime(0)
+  clienteFrecuente Boolean   @default(false) @map("cliente_frecuente")
+
+  intereses           Interes[]
+  favoritos           Favorito[]
+  historial           HistorialCliente[]
+  pipelineMovimientos PipelineMovimiento[]
+  ventas              Venta[]
+
+  @@index([email], map: "idx_clientes_email")
+  @@index([telefono], map: "idx_clientes_telefono")
+  @@map("clientes")
+}
+
+model Interes {
+  id         BigInt        @id @default(autoincrement()) @db.UnsignedBigInt
+  clienteId  BigInt        @map("cliente_id") @db.UnsignedBigInt
+  productoId BigInt        @map("producto_id") @db.UnsignedBigInt
+  estado     EstadoInteres @default(consulto)
+  fecha      DateTime      @default(now()) @db.DateTime(0)
+  notas      String?       @db.VarChar(255)
+
+  cliente  Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_intereses_cliente")
+  producto Producto @relation(fields: [productoId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_intereses_producto")
+
+  @@index([clienteId], map: "idx_intereses_cliente")
+  @@index([productoId], map: "idx_intereses_producto")
+  @@index([estado], map: "idx_intereses_estado")
+  @@map("intereses")
+}
+
+model Favorito {
+  id         BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  clienteId  BigInt   @map("cliente_id") @db.UnsignedBigInt
+  productoId BigInt   @map("producto_id") @db.UnsignedBigInt
+  fecha      DateTime @default(now()) @db.DateTime(0)
+
+  cliente  Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_favoritos_cliente")
+  producto Producto @relation(fields: [productoId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_favoritos_producto")
+
+  @@unique([clienteId, productoId], map: "uq_favoritos_cliente_producto")
+  @@index([productoId], map: "fk_favoritos_producto")
+  @@map("favoritos")
+}
+
+model HistorialCliente {
+  id          BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  clienteId   BigInt   @map("cliente_id") @db.UnsignedBigInt
+  usuarioId   BigInt?  @map("usuario_id") @db.UnsignedBigInt
+  tipo        String   @db.VarChar(50)
+  descripcion String   @db.VarChar(500)
+  fecha       DateTime @default(now()) @db.DateTime(0)
+
+  cliente Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_historial_cliente")
+  usuario Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_historial_usuario")
+
+  @@index([clienteId], map: "idx_historial_cliente")
+  @@index([usuarioId], map: "fk_historial_usuario")
+  @@map("historial_cliente")
+}
+
+model PipelineEtapa {
+  id     BigInt @id @default(autoincrement()) @db.UnsignedBigInt
+  nombre String @unique(map: "uq_pipeline_etapas_nombre") @db.VarChar(40)
+  orden  Int
+
+  movimientos PipelineMovimiento[]
+
+  @@map("pipeline_etapas")
+}
+
+model PipelineMovimiento {
+  id         BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  clienteId  BigInt   @map("cliente_id") @db.UnsignedBigInt
+  etapaId    BigInt   @map("etapa_id") @db.UnsignedBigInt
+  productoId BigInt?  @map("producto_id") @db.UnsignedBigInt
+  usuarioId  BigInt?  @map("usuario_id") @db.UnsignedBigInt
+  fecha      DateTime @default(now()) @db.DateTime(0)
+  notas      String?  @db.VarChar(255)
+
+  cliente  Cliente       @relation(fields: [clienteId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_pipeline_mov_cliente")
+  etapa    PipelineEtapa @relation(fields: [etapaId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_pipeline_mov_etapa")
+  producto Producto?     @relation(fields: [productoId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_pipeline_mov_producto")
+  usuario  Usuario?      @relation(fields: [usuarioId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_pipeline_mov_usuario")
+
+  @@index([clienteId], map: "idx_pipeline_mov_cliente")
+  @@index([etapaId], map: "idx_pipeline_mov_etapa")
+  @@index([productoId], map: "fk_pipeline_mov_producto")
+  @@index([usuarioId], map: "fk_pipeline_mov_usuario")
+  @@map("pipeline_movimientos")
+}
+
+model Venta {
+  id        BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  clienteId BigInt    @map("cliente_id") @db.UnsignedBigInt
+  fecha     DateTime  @default(now()) @db.DateTime(0)
+  formaPago FormaPago @default(transferencia) @map("forma_pago")
+  total     Decimal   @default(0) @db.Decimal(10, 2)
+  notas     String?   @db.VarChar(255)
+
+  cliente Cliente     @relation(fields: [clienteId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_ventas_cliente")
+  items   VentaItem[]
+
+  @@index([clienteId], map: "idx_ventas_cliente")
+  @@index([fecha], map: "idx_ventas_fecha")
+  @@map("ventas")
+}
+
+model VentaItem {
+  id             BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+  ventaId        BigInt  @map("venta_id") @db.UnsignedBigInt
+  productoId     BigInt  @map("producto_id") @db.UnsignedBigInt
+  precioOriginal Decimal @map("precio_original") @db.Decimal(10, 2)
+  precioVendido  Decimal @map("precio_vendido") @db.Decimal(10, 2)
+  descuento      Decimal @default(0) @db.Decimal(10, 2)
+
+  venta    Venta    @relation(fields: [ventaId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_venta_items_venta")
+  producto Producto @relation(fields: [productoId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_venta_items_producto")
+
+  @@index([ventaId], map: "idx_venta_items_venta")
+  @@index([productoId], map: "idx_venta_items_producto")
+  @@map("venta_items")
+}
+
+// ============================================================
+// Varios
+// ============================================================
+
+model Configuracion {
+  clave String  @id @db.VarChar(80)
+  valor String? @db.Text
+
+  @@map("configuraciones")
+}
+
+/// Suscriptores del newsletter (home) — envío manual/batched, nunca automático por producto.
+model Suscriptor {
+  id               BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  email            String   @unique(map: "uq_suscriptores_email") @db.VarChar(160)
+  activo           Boolean  @default(true)
+  fechaSuscripcion DateTime @default(now()) @map("fecha_suscripcion") @db.DateTime(0)
+
+  @@map("suscriptores")
+}
