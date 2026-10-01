@@ -87,6 +87,88 @@ producción, considera mover esto a un bucket (S3, Spaces de DigitalOcean) y
 que `imagenes` guarde la URL del bucket en vez de la ruta local — la
 interfaz del repository no cambia, solo de dónde viene la URL.
 
+## Deploy (Docker en droplet de DigitalOcean)
+
+Producción corre con `docker-compose.prod.yml`: dos contenedores en una red
+propia (`eunikmoda_net`), independientes de cualquier otro proyecto del droplet.
+
+| Servicio | Qué es | Expuesto |
+|---|---|---|
+| `eunikmoda_backend` | Esta API (imagen del `Dockerfile`) | Puerto **4001** del host → 4000 del contenedor |
+| `eunikmoda_db` | `mysql:8`, datos en el volumen `eunikmoda_mysql_data` | No: solo desde el backend, por la red interna |
+
+Al arrancar, el backend corre `prisma migrate deploy` (aplica migraciones
+pendientes) y luego levanta la API. Las imágenes subidas viven en `./uploads`
+del droplet (volumen), no dentro de la imagen.
+
+### Primera vez (manual, en el droplet)
+
+Requisitos: Docker con el plugin `docker compose`, y un usuario que pueda usar
+docker sin `sudo` (el mismo que usará GitHub Actions).
+
+```bash
+# 1. Clonar el repo en el home del usuario de deploy (el workflow hace `cd ~/eunikmoda-backend`).
+#    Si el repo es privado, el droplet necesita acceso de lectura (p. ej. una deploy key en GitHub).
+cd ~
+git clone git@github.com:andresguerreroh/eunikmoda-backend.git
+cd eunikmoda-backend
+
+# 2. Crear el .env de producción (está en .gitignore; nunca se commitea).
+cp .env.production.example .env.production
+nano .env.production
+#    - Contraseñas nuevas (solo letras y números: `openssl rand -hex 24`), y las mismas en DATABASE_URL.
+#    - JWT_SECRET NUEVO, distinto al de desarrollo: `openssl rand -base64 48`
+#    - CORS_ORIGIN y FRONTEND_URL = dominio real del frontend en Vercel.
+
+# 3. Levantar todo (crea la base, aplica las migraciones y arranca la API).
+docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml logs -f eunikmoda_backend   # Ctrl+C para salir
+
+# 4. Cargar los catálogos iniciales UNA vez. La imagen final no incluye tsx (devDependency),
+#    así que el seed corre desde el stage "builder" del mismo Dockerfile:
+docker build --target builder -t eunikmoda-seed .
+docker run --rm --network eunikmoda_net --env-file .env.production eunikmoda-seed npx prisma db seed
+docker image rm eunikmoda-seed
+
+# 5. Reemplazar el password placeholder del admin (ver "Setup") por un hash real:
+docker compose -f docker-compose.prod.yml exec eunikmoda_db \
+  sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"'
+#    UPDATE usuarios SET password_hash = '<hash bcrypt>' WHERE email = 'admin@eunikmoda.cl';
+```
+
+Configura en GitHub (Settings → Secrets and variables → Actions) los secrets
+que usa el workflow:
+
+| Secret | Valor |
+|---|---|
+| `DO_HOST` | IP o hostname del droplet |
+| `DO_USERNAME` | Usuario SSH de deploy (el que clonó el repo en su home) |
+| `DO_SSH_KEY` | Llave privada SSH completa; la pública va en `~/.ssh/authorized_keys` de ese usuario |
+| `DO_PORT` | Puerto SSH (22 salvo que el droplet use otro; si no se define, se usa 22) |
+
+### De ahí en adelante (automático)
+
+Cada push a `main` dispara `.github/workflows/deploy.yml`:
+
+1. **Typecheck y build** en GitHub. Si falla, no se despliega nada.
+2. **Deploy:** por SSH al droplet → `cd ~/eunikmoda-backend` → `git pull --ff-only`
+   → `docker compose -f docker-compose.prod.yml up -d --build`. Se reconstruye la
+   imagen y, al arrancar, se aplican las migraciones nuevas.
+
+Queda manual: cambios en `.env.production` (luego `docker compose -f
+docker-compose.prod.yml up -d` para recrear los contenedores) y volver a correr
+el seed si se agregan catálogos nuevos (el seed se puede re-ejecutar sin duplicar).
+
+### HTTPS (necesario para el frontend en Vercel)
+
+El frontend se sirve por `https`, y el navegador bloquea las llamadas a una API
+en `http://IP:4001` (contenido mixto). La API necesita un dominio con TLS: un
+reverse proxy en el droplet (nginx, Caddy, Traefik, etc.) que termine HTTPS y
+reenvíe a `localhost:4001`. Si ese proxy corre en el host, conviene publicar el
+puerto solo en loopback (`"127.0.0.1:4001:4000"` en `docker-compose.prod.yml`).
+Docker abre los puertos publicados saltándose `ufw`, así que `4001:4000` queda
+accesible desde internet.
+
 ## Estructura
 
 ```
@@ -106,6 +188,9 @@ prisma/
 ├── migrations/    historial de migraciones SQL
 └── seed.ts        categorías, tallas (letra + numéricas), colores, materiales, pipeline, admin
 prisma.config.ts   config de la CLI de Prisma (DATABASE_URL, ruta de migraciones, comando de seed)
+Dockerfile         imagen de producción (multi-stage: builder + runtime)
+docker-compose.prod.yml  backend + MySQL para el droplet (red eunikmoda_net)
+.github/workflows/deploy.yml  deploy automático en cada push a main
 db/legacy/         schema.sql.bak y seed.sql.bak: SQL anterior a Prisma, solo referencia histórica
 ```
 

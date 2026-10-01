@@ -1,0 +1,17 @@
+node_modules
+dist
+.env
+.env.*
+uploads/*
+
+# Se genera dentro de la imagen (`prisma generate`); no copiar la versión local.
+src/generated
+
+.git
+.github
+*.log
+db/legacy
+.claude
+.agents
+.windsurf
+skills-lock.json

@@ -1,0 +1,54 @@
+# Deploy a producción (droplet de DigitalOcean) en cada push a main.
+#
+# Secrets requeridos (GitHub → Settings → Secrets and variables → Actions):
+#   DO_HOST      IP o hostname del droplet.
+#   DO_USERNAME  Usuario SSH del droplet (debe poder usar docker sin sudo y tener
+#                el repo clonado en ~/eunikmoda-backend).
+#   DO_SSH_KEY   Llave privada SSH (contenido completo, incluidas las líneas BEGIN/END)
+#                cuya pública está en ~/.ssh/authorized_keys de DO_USERNAME.
+#   DO_PORT      Puerto SSH. Normalmente 22; si no se define, se usa 22.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+# Nunca dos deploys a la vez; si llegan pushes seguidos, se encolan.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Typecheck y build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6 # versión de pnpm tomada de "packageManager" en package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile # postinstall: prisma generate
+      - run: pnpm typecheck
+      - run: pnpm build
+
+  deploy:
+    name: Deploy al droplet
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.DO_HOST }}
+          username: ${{ secrets.DO_USERNAME }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          port: ${{ secrets.DO_PORT || 22 }}
+          # El build de la imagen en el droplet puede superar los 10 min por defecto.
+          command_timeout: 30m
+          script: |
+            set -e
+            cd ~/eunikmoda-backend
+            git pull --ff-only origin main
+            docker compose -f docker-compose.prod.yml up -d --build

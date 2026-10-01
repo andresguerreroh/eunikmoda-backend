@@ -1,0 +1,53 @@
+# EUNIKMODA — producción (droplet de DigitalOcean).
+# Proyecto, red y volumen con nombres propios: independiente de cualquier otro
+# docker compose que corra en el mismo droplet.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+
+name: eunikmoda
+
+services:
+  eunikmoda_backend:
+    build: .
+    restart: unless-stopped
+    env_file: .env.production
+    ports:
+      - "4001:4000"
+    volumes:
+      # Imágenes subidas desde el admin: persisten fuera de la imagen.
+      - ./uploads:/app/uploads
+    depends_on:
+      eunikmoda_db:
+        # Espera a que MySQL acepte conexiones; si no, `prisma migrate deploy` falla
+        # en el primer arranque mientras MySQL todavía inicializa el volumen.
+        condition: service_healthy
+    networks:
+      - eunikmoda_net
+
+  eunikmoda_db:
+    image: mysql:8
+    restart: unless-stopped
+    # Usa MYSQL_DATABASE / MYSQL_USER / MYSQL_PASSWORD / MYSQL_ROOT_PASSWORD (solo
+    # se aplican la primera vez, al inicializar un volumen vacío).
+    env_file: .env.production
+    volumes:
+      - eunikmoda_mysql_data:/var/lib/mysql
+    # Sin `ports`: solo accesible desde eunikmoda_backend por la red interna.
+    healthcheck:
+      # -h 127.0.0.1 (TCP): durante la inicialización MySQL corre sin red, así que
+      # no se reporta "healthy" antes de tiempo.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - eunikmoda_net
+
+volumes:
+  eunikmoda_mysql_data:
+    name: eunikmoda_mysql_data
+
+networks:
+  eunikmoda_net:
+    name: eunikmoda_net

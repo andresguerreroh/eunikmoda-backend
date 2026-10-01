@@ -3,9 +3,12 @@
 // de tablas, columnas, índices y FKs que venían de db/legacy/schema.sql.bak.
 
 generator client {
-  provider     = "prisma-client"
-  output       = "../src/generated/prisma"
-  moduleFormat = "cjs"
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "cjs"
+  // Explícito: si no, Prisma lo infiere del tsconfig.json, y en el Dockerfile `prisma generate`
+  // corre antes de copiar tsconfig.json (generaría imports "./x.ts" que Node no resuelve).
+  importFileExtension = ""
 }
 
 datasource db {
