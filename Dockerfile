@@ -23,8 +23,8 @@ COPY src ./src
 # El cliente generado vive en src/generated/prisma (.ts), así que tsc lo compila a dist/generated/prisma.
 RUN pnpm build
 
-# Migraciones, seed y config de la CLI: necesarios en el stage final (migrate deploy) y para
-# correr el seed una vez desde este stage (ver README, "Deploy").
+# Schema, migraciones y config de la CLI: el stage final los necesita para `migrate deploy` y
+# `db seed` (el seed ya viene compilado en dist/scripts/seed.js; ver README, "Deploy").
 COPY prisma ./prisma
 COPY prisma.config.ts ./
 

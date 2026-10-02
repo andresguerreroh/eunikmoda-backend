@@ -6,7 +6,9 @@ export default defineConfig({
   migrations: {
     path: "prisma/migrations",
     // Prisma 7 ya no lee `package.json#prisma.seed`; el seed se configura acá.
-    seed: "tsx prisma/seed.ts",
+    // Corre el JS compilado (src/scripts/seed.ts → dist/scripts/seed.js): así funciona igual en
+    // local (tras `pnpm build`) y dentro de la imagen de producción, que solo trae dist/ y no tsx.
+    seed: "node dist/scripts/seed.js",
   },
   datasource: {
     url: env("DATABASE_URL"),

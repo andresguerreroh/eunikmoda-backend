@@ -1,10 +1,11 @@
 // ============================================================
 // EUNIKMODA — Seed inicial (mismos datos que db/legacy/seed.sql.bak)
-// Ejecutar con: npx prisma db seed
+// Ejecutar con: npx prisma db seed  (corre el JS compilado, dist/scripts/seed.js;
+// en local hace falta `pnpm build` antes. En producción ver README, "Deploy").
 // ============================================================
 import "dotenv/config";
-import { PrismaClient } from "../src/generated/prisma/client";
-import { crearAdapter } from "../src/config/prisma-adapter";
+import { PrismaClient } from "../generated/prisma/client";
+import { crearAdapter } from "../config/prisma-adapter";
 
 const prisma = new PrismaClient({ adapter: crearAdapter(process.env.DATABASE_URL ?? "") });
 

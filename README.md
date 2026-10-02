@@ -10,7 +10,8 @@ pnpm install
 cp .env.example .env   # completa DATABASE_URL, JWT_SECRET, RESEND_API_KEY
 
 npx prisma migrate dev   # crea la BD (si no existe) y aplica prisma/migrations
-npx prisma db seed       # carga catálogos + admin (prisma/seed.ts)
+pnpm build               # el seed corre compilado (dist/scripts/seed.js)
+npx prisma db seed       # carga catálogos + admin (src/scripts/seed.ts)
 
 pnpm dev   # http://localhost:4000
 ```
@@ -94,7 +95,7 @@ propia (`eunikmoda_net`), independientes de cualquier otro proyecto del droplet.
 
 | Servicio | Qué es | Expuesto |
 |---|---|---|
-| `eunikmoda_backend` | Esta API (imagen del `Dockerfile`) | Puerto **4001** del host → 4000 del contenedor |
+| `eunikmoda_backend` | Esta API (imagen del `Dockerfile`) | Solo dentro del droplet: `127.0.0.1:4001` → 4000 del contenedor (Nginx la publica por HTTPS) |
 | `eunikmoda_db` | `mysql:8`, datos en el volumen `eunikmoda_mysql_data` | No: solo desde el backend, por la red interna |
 
 Al arrancar, el backend corre `prisma migrate deploy` (aplica migraciones
@@ -106,12 +107,18 @@ del droplet (volumen), no dentro de la imagen.
 Requisitos: Docker con el plugin `docker compose`, y un usuario que pueda usar
 docker sin `sudo` (el mismo que usará GitHub Actions).
 
+El repo vive en `/opt/eunikmoda-backend` (el workflow hace `cd` ahí). `/opt`
+suele pertenecer a root: si el usuario de deploy no es root, necesita permisos de
+escritura explícitos sobre ese directorio (si no, fallan el `git clone` y los
+`git pull` del deploy automático).
+
 ```bash
-# 1. Clonar el repo en el home del usuario de deploy (el workflow hace `cd ~/eunikmoda-backend`).
+# 1. Crear el directorio, darle permisos al usuario de deploy y clonar el repo.
 #    Si el repo es privado, el droplet necesita acceso de lectura (p. ej. una deploy key en GitHub).
-cd ~
-git clone git@github.com:andresguerreroh/eunikmoda-backend.git
-cd eunikmoda-backend
+sudo mkdir -p /opt/eunikmoda-backend
+sudo chown "$USER":"$USER" /opt/eunikmoda-backend   # innecesario si el usuario de deploy es root
+git clone git@github.com:andresguerreroh/eunikmoda-backend.git /opt/eunikmoda-backend
+cd /opt/eunikmoda-backend
 
 # 2. Crear el .env de producción (está en .gitignore; nunca se commitea).
 cp .env.production.example .env.production
@@ -124,11 +131,10 @@ nano .env.production
 docker compose -f docker-compose.prod.yml up -d --build
 docker compose -f docker-compose.prod.yml logs -f eunikmoda_backend   # Ctrl+C para salir
 
-# 4. Cargar los catálogos iniciales UNA vez. La imagen final no incluye tsx (devDependency),
-#    así que el seed corre desde el stage "builder" del mismo Dockerfile:
-docker build --target builder -t eunikmoda-seed .
-docker run --rm --network eunikmoda_net --env-file .env.production eunikmoda-seed npx prisma db seed
-docker image rm eunikmoda-seed
+# 4. Cargar los catálogos iniciales (se puede re-ejecutar sin duplicar). Corre dentro del
+#    contenedor del backend: el seed viene compilado en la imagen (dist/scripts/seed.js),
+#    sin tsx ni pasos manuales.
+docker compose -f docker-compose.prod.yml exec eunikmoda_backend npx prisma db seed
 
 # 5. Reemplazar el password placeholder del admin (ver "Setup") por un hash real:
 docker compose -f docker-compose.prod.yml exec eunikmoda_db \
@@ -142,7 +148,7 @@ que usa el workflow:
 | Secret | Valor |
 |---|---|
 | `DO_HOST` | IP o hostname del droplet |
-| `DO_USERNAME` | Usuario SSH de deploy (el que clonó el repo en su home) |
+| `DO_USERNAME` | Usuario SSH de deploy (con permisos de escritura en `/opt/eunikmoda-backend`) |
 | `DO_SSH_KEY` | Llave privada SSH completa; la pública va en `~/.ssh/authorized_keys` de ese usuario |
 | `DO_PORT` | Puerto SSH (22 salvo que el droplet use otro; si no se define, se usa 22) |
 
@@ -151,23 +157,114 @@ que usa el workflow:
 Cada push a `main` dispara `.github/workflows/deploy.yml`:
 
 1. **Typecheck y build** en GitHub. Si falla, no se despliega nada.
-2. **Deploy:** por SSH al droplet → `cd ~/eunikmoda-backend` → `git pull --ff-only`
+2. **Deploy:** por SSH al droplet → `cd /opt/eunikmoda-backend` → `git pull --ff-only`
    → `docker compose -f docker-compose.prod.yml up -d --build`. Se reconstruye la
    imagen y, al arrancar, se aplican las migraciones nuevas.
 
 Queda manual: cambios en `.env.production` (luego `docker compose -f
 docker-compose.prod.yml up -d` para recrear los contenedores) y volver a correr
-el seed si se agregan catálogos nuevos (el seed se puede re-ejecutar sin duplicar).
+el seed si se agregan catálogos nuevos (mismo comando del paso 4; se puede
+re-ejecutar sin duplicar).
 
 ### HTTPS (necesario para el frontend en Vercel)
 
-El frontend se sirve por `https`, y el navegador bloquea las llamadas a una API
-en `http://IP:4001` (contenido mixto). La API necesita un dominio con TLS: un
-reverse proxy en el droplet (nginx, Caddy, Traefik, etc.) que termine HTTPS y
-reenvíe a `localhost:4001`. Si ese proxy corre en el host, conviene publicar el
-puerto solo en loopback (`"127.0.0.1:4001:4000"` en `docker-compose.prod.yml`).
-Docker abre los puertos publicados saltándose `ufw`, así que `4001:4000` queda
-accesible desde internet.
+El frontend se sirve por `https` y el navegador bloquea llamadas a una API por
+`http` (contenido mixto). La API se publica en un subdominio con TLS: Nginx en el
+droplet termina HTTPS y reenvía a `127.0.0.1:4001`, el único lugar donde escucha
+el backend (ver `ports` en `docker-compose.prod.yml`).
+
+El subdominio de la API es `api.eunikmoda.cl`.
+
+**1. Delegar el dominio a DigitalOcean (NIC Chile).** En el panel del dominio en
+NIC Chile:
+
+1. En **"Servidores DNS"**, reemplaza los servidores por `ns1.digitalocean.com`,
+   `ns2.digitalocean.com` y `ns3.digitalocean.com`.
+2. **Confirma el cambio en la sección de condiciones de contratación.** Hacen falta
+   ambos pasos: sin esta confirmación, el cambio del paso 1 queda guardado pero
+   **no se publica**.
+
+**2. Registro DNS en DigitalOcean.** En DigitalOcean → **Networking → Domains**,
+agrega el dominio (`eunikmoda.cl`) y, dentro de él, un registro **A** para el
+subdominio de la API (`api`) apuntando a la IP del droplet.
+
+> La delegación de nameservers puede tardar en publicarse, y no de forma pareja
+> entre resolvers: puede verse propagada en Google (`8.8.8.8`), Cloudflare
+> (`1.1.1.1`), etc. antes que al consultar directo a los servidores del ccTLD
+> `.cl` (o al revés). Que un resolver todavía muestre los NS antiguos no significa
+> que algo esté mal; espera y vuelve a consultar antes de cambiar la configuración.
+
+**3. Nginx + certificado.** Crea a mano `/etc/nginx/sites-available/eunikmoda-api`
+(un archivo propio: no toca la configuración de otros proyectos del droplet) con
+el bloque base, solo HTTP:
+
+```nginx
+server {
+    server_name api.eunikmoda.cl;
+    client_max_body_size 6m;
+
+    location / {
+        proxy_pass http://localhost:4001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    listen 80;
+}
+```
+
+`client_max_body_size 6m` es necesario: los uploads del admin aceptan hasta 5 MB
+(ver `middlewares/upload.middleware.ts`) y el default de Nginx (1 MB) los cortaría
+con un 413.
+
+```bash
+sudo ln -s /etc/nginx/sites-available/eunikmoda-api /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d api.eunikmoda.cl
+```
+
+`certbot --nginx` necesita que el registro A ya resuelva a la IP del droplet
+(paso 2). Al correrlo, certbot emite el certificado y reescribe el archivo: agrega
+el `listen 443 ssl`, las rutas del certificado y un segundo bloque que redirige
+HTTP → HTTPS. Todas las líneas marcadas `# managed by Certbot` las genera él; no se
+escriben a mano. El archivo queda así (es el que corre hoy en el droplet):
+
+```nginx
+server {
+    server_name api.eunikmoda.cl;
+    client_max_body_size 6m;
+
+    location / {
+        proxy_pass http://localhost:4001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/api.eunikmoda.cl/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/api.eunikmoda.cl/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+}
+server {
+    if ($host = api.eunikmoda.cl) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+    listen 80;
+    server_name api.eunikmoda.cl;
+    return 404; # managed by Certbot
+}
+```
+
+La API queda en `https://api.eunikmoda.cl` y certbot renueva el certificado
+automáticamente. La configuración de Nginx no forma parte del deploy automático:
+cualquier cambio en este archivo se hace a mano en el droplet (y luego
+`sudo nginx -t && sudo systemctl reload nginx`).
 
 ## Estructura
 
@@ -182,11 +279,12 @@ src/
 ├── models/        tipos TS
 ├── dtos/          esquemas zod
 ├── utils/         ApiError, asyncHandler, jwt, sku (generación + slugify)
+├── scripts/       seed.ts: categorías, tallas, colores, materiales, pipeline, admin
+│                  (compila a dist/scripts/seed.js; lo corre `npx prisma db seed`)
 └── generated/     cliente Prisma generado (gitignored)
 prisma/
 ├── schema.prisma  modelos (camelCase en TS, @map a las columnas snake_case reales)
-├── migrations/    historial de migraciones SQL
-└── seed.ts        categorías, tallas (letra + numéricas), colores, materiales, pipeline, admin
+└── migrations/    historial de migraciones SQL
 prisma.config.ts   config de la CLI de Prisma (DATABASE_URL, ruta de migraciones, comando de seed)
 Dockerfile         imagen de producción (multi-stage: builder + runtime)
 docker-compose.prod.yml  backend + MySQL para el droplet (red eunikmoda_net)
