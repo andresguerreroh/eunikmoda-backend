@@ -12,7 +12,7 @@ services:
     restart: unless-stopped
     env_file: .env.production
     ports:
-      - "4001:4000"
+      - "127.0.0.1:4001:4000"
     volumes:
       # Imágenes subidas desde el admin: persisten fuera de la imagen.
       - ./uploads:/app/uploads
