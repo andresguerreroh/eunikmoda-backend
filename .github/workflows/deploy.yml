@@ -49,6 +49,6 @@ jobs:
           command_timeout: 30m
           script: |
             set -e
-            cd ~/eunikmoda-backend
+            cd /opt/eunikmoda-backend
             git pull --ff-only origin main
             docker compose -f docker-compose.prod.yml up -d --build
