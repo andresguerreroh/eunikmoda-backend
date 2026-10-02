@@ -5,6 +5,7 @@ import morgan from "morgan";
 import cookieParser from "cookie-parser";
 import path from "node:path";
 import { env } from "./config/env";
+import { corsOrigin } from "./config/cors";
 import { publicRouter } from "./routes/public";
 import { adminRouter } from "./routes/admin";
 import { errorMiddleware, notFoundMiddleware } from "./middlewares/error.middleware";
@@ -19,7 +20,7 @@ export function createApp() {
       crossOriginResourcePolicy: { policy: "cross-origin" },
     })
   );
-  app.use(cors({ origin: env.corsOrigin, credentials: true }));
+  app.use(cors({ origin: corsOrigin(env.corsOrigins), credentials: true }));
   app.use(express.json());
   app.use(cookieParser());
   if (env.nodeEnv !== "test") {

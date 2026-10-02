@@ -6,6 +6,14 @@ function required(name: string, fallback?: string): string {
   return value;
 }
 
+/** "a, b/,  c" → ["a", "b", "c"]: sin espacios, sin vacíos y sin "/" final (un Origin nunca lo trae). */
+function parsearLista(valor: string): string[] {
+  return valor
+    .split(",")
+    .map((v) => v.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+}
+
 export const env = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: Number(process.env.PORT ?? 4000),
@@ -14,7 +22,8 @@ export const env = {
     secret: required("JWT_SECRET"),
     expiresIn: process.env.JWT_EXPIRES_IN ?? "8h",
   },
-  corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:3000",
+  // Lista de orígenes exactos separados por comas (además, *.vercel.app se acepta en config/cors.ts).
+  corsOrigins: parsearLista(process.env.CORS_ORIGIN ?? "http://localhost:3000"),
   uploadsDir: process.env.UPLOADS_DIR ?? "uploads",
   frontendUrl: process.env.FRONTEND_URL ?? "http://localhost:3000",
   resend: {

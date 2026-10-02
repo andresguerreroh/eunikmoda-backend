@@ -125,7 +125,9 @@ cp .env.production.example .env.production
 nano .env.production
 #    - Contraseñas nuevas (solo letras y números: `openssl rand -hex 24`), y las mismas en DATABASE_URL.
 #    - JWT_SECRET NUEVO, distinto al de desarrollo: `openssl rand -base64 48`
-#    - CORS_ORIGIN y FRONTEND_URL = dominio real del frontend en Vercel.
+#    - CORS_ORIGIN = orígenes del frontend separados por comas (p. ej. https://eunikmoda.cl);
+#      https://*.vercel.app (dominio por defecto y previews) ya se acepta desde el código.
+#    - FRONTEND_URL = dominio real del frontend (links del newsletter).
 
 # 3. Levantar todo (crea la base, aplica las migraciones y arranca la API).
 docker compose -f docker-compose.prod.yml up -d --build
