@@ -50,6 +50,15 @@ async function main() {
     ],
   });
 
+  await prisma.marca.createMany({
+    skipDuplicates: true,
+    data: [
+      { nombre: "Zara", slug: "zara" }, { nombre: "H&M", slug: "h-m" },
+      { nombre: "H&M Premium", slug: "h-m-premium" }, { nombre: "Mango", slug: "mango" },
+      { nombre: "Forever21", slug: "forever21" }, { nombre: "Levi's", slug: "levi-s" },
+    ],
+  });
+
   await prisma.origen.createMany({
     skipDuplicates: true,
     data: [
