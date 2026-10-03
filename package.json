@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
+    "crear-usuario": "node dist/scripts/crear-usuario.js",
     "postinstall": "prisma generate"
   },
   "dependencies": {
