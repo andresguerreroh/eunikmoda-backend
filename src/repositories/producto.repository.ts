@@ -3,7 +3,9 @@ import type { Prisma, TipoDescuento } from "../generated/prisma/client";
 import type {
   ProductoListItem,
   ProductoDetalle,
+  ProductoParaEdicion,
   CrearProductoInput,
+  ActualizarProductoInput,
 } from "../models/producto.types";
 
 export interface ProductoFiltros {
@@ -32,6 +34,16 @@ const TIPO_DESCUENTO: Record<NonNullable<CrearProductoInput["tipoDescuento"]>, T
   monto_fijo: "monto_fijo",
   "2x1": "dos_x_uno",
   "3x2": "tres_x_dos",
+};
+
+// Dirección inversa de TIPO_DESCUENTO, para devolver al formulario de edición
+// el mismo formato ("2x1"/"3x2") que usa crearProductoSchema, no el de la BD.
+const TIPO_DESCUENTO_INVERSO: Record<TipoDescuento, NonNullable<CrearProductoInput["tipoDescuento"]>> = {
+  ninguno: "ninguno",
+  porcentaje: "porcentaje",
+  monto_fijo: "monto_fijo",
+  dos_x_uno: "2x1",
+  tres_x_dos: "3x2",
 };
 
 /** Columna DATE → "YYYY-MM-DD" (Prisma la entrega como medianoche UTC). */
@@ -154,6 +166,63 @@ export const productoRepository = {
   },
 
   /**
+   * Detalle para el formulario de edición: a diferencia de findDetalleBySlug
+   * (pensado para mostrar al público, con nombres), esta devuelve los IDs
+   * reales de cada relación para preseleccionar selects/checkboxes.
+   */
+  async findParaEdicion(id: number): Promise<ProductoParaEdicion | null> {
+    const p = await prisma.producto.findUnique({
+      where: { id },
+      select: {
+        id: true, sku: true, nombre: true, slug: true, descripcionCorta: true, descripcionLarga: true,
+        precio: true, precioAnterior: true, tipoDescuento: true, valorDescuento: true, precioFinal: true,
+        categoriaId: true, subcategoriaId: true, marcaId: true, origenId: true, temporadaId: true,
+        coleccionId: true, materialPrincipalId: true, colorPrincipalId: true,
+        paisFabricacion: true, estado: true, destacado: true, nuevo: true, visible: true, fechaIngreso: true,
+        imagenes: { select: { id: true, url: true, orden: true, esPrincipal: true }, orderBy: ORDEN_IMAGENES },
+        tallas: { select: { tallaId: true }, orderBy: { tallaId: "asc" } },
+        colores: { select: { colorId: true }, orderBy: { colorId: "asc" } },
+        materiales: { select: { materialId: true }, orderBy: { materialId: "asc" } },
+        tags: { select: { tagId: true }, orderBy: { tagId: "asc" } },
+      },
+    });
+    if (!p) return null;
+
+    return {
+      id: Number(p.id),
+      sku: p.sku,
+      nombre: p.nombre,
+      slug: p.slug,
+      descripcionCorta: p.descripcionCorta,
+      descripcionLarga: p.descripcionLarga,
+      precio: p.precio.toNumber(),
+      precioAnterior: p.precioAnterior !== null ? p.precioAnterior.toNumber() : null,
+      tipoDescuento: TIPO_DESCUENTO_INVERSO[p.tipoDescuento],
+      valorDescuento: p.valorDescuento !== null ? p.valorDescuento.toNumber() : null,
+      precioFinal: p.precioFinal.toNumber(),
+      categoriaId: Number(p.categoriaId),
+      subcategoriaId: p.subcategoriaId !== null ? Number(p.subcategoriaId) : null,
+      marcaId: Number(p.marcaId),
+      origenId: Number(p.origenId),
+      temporadaId: p.temporadaId !== null ? Number(p.temporadaId) : null,
+      coleccionId: p.coleccionId !== null ? Number(p.coleccionId) : null,
+      materialPrincipalId: p.materialPrincipalId !== null ? Number(p.materialPrincipalId) : null,
+      colorPrincipalId: p.colorPrincipalId !== null ? Number(p.colorPrincipalId) : null,
+      paisFabricacion: p.paisFabricacion,
+      estado: p.estado,
+      destacado: p.destacado,
+      nuevo: p.nuevo,
+      visible: p.visible,
+      fechaIngreso: fechaComoTexto(p.fechaIngreso),
+      imagenes: p.imagenes.map((i) => ({ id: Number(i.id), url: i.url, orden: i.orden, esPrincipal: i.esPrincipal })),
+      tallaIds: p.tallas.map((t) => Number(t.tallaId)),
+      colorIds: p.colores.map((c) => Number(c.colorId)),
+      materialIds: p.materiales.map((m) => Number(m.materialId)),
+      tagIds: p.tags.map((t) => Number(t.tagId)),
+    };
+  },
+
+  /**
    * Crea el producto con sus relaciones en una sola transacción. El SKU y el slug
    * incluyen el id autoincremental, así que se inserta con valores temporales únicos
    * y se reemplazan con `identificadores(id)` antes de hacer commit.
@@ -213,6 +282,120 @@ export const productoRepository = {
       await tx.producto.update({ where: { id: creado.id }, data: { sku, slug } });
 
       return { id, sku, slug };
+    });
+  },
+
+  /**
+   * UPDATE de los campos simples que vengan en `data` — nunca pisa con NULL lo
+   * que no se mandó. sku y slug son inmutables desde acá (no forman parte de
+   * ActualizarProductoInput) para no romper links existentes al producto.
+   * Acepta un `client` opcional para poder participar de la transacción de
+   * `actualizar()`; por defecto usa el cliente global.
+   */
+  async actualizarEscalares(
+    id: number,
+    data: ActualizarProductoInput,
+    precioFinal?: Prisma.Decimal,
+    client: Prisma.TransactionClient = prisma
+  ): Promise<void> {
+    const campos: Prisma.ProductoUncheckedUpdateInput = {};
+    if (data.nombre !== undefined) campos.nombre = data.nombre;
+    if (data.descripcionCorta !== undefined) campos.descripcionCorta = data.descripcionCorta;
+    if (data.descripcionLarga !== undefined) campos.descripcionLarga = data.descripcionLarga;
+    if (data.precio !== undefined) campos.precio = data.precio;
+    if (data.precioAnterior !== undefined) campos.precioAnterior = data.precioAnterior;
+    if (data.tipoDescuento !== undefined) campos.tipoDescuento = TIPO_DESCUENTO[data.tipoDescuento];
+    if (data.valorDescuento !== undefined) campos.valorDescuento = data.valorDescuento;
+    if (precioFinal !== undefined) campos.precioFinal = precioFinal;
+    if (data.categoriaId !== undefined) campos.categoriaId = data.categoriaId;
+    if (data.subcategoriaId !== undefined) campos.subcategoriaId = data.subcategoriaId;
+    if (data.marcaId !== undefined) campos.marcaId = data.marcaId;
+    if (data.origenId !== undefined) campos.origenId = data.origenId;
+    if (data.temporadaId !== undefined) campos.temporadaId = data.temporadaId;
+    if (data.coleccionId !== undefined) campos.coleccionId = data.coleccionId;
+    if (data.materialPrincipalId !== undefined) campos.materialPrincipalId = data.materialPrincipalId;
+    if (data.colorPrincipalId !== undefined) campos.colorPrincipalId = data.colorPrincipalId;
+    if (data.paisFabricacion !== undefined) campos.paisFabricacion = data.paisFabricacion;
+    if (data.estado !== undefined) campos.estado = data.estado;
+    if (data.destacado !== undefined) campos.destacado = data.destacado;
+    if (data.nuevo !== undefined) campos.nuevo = data.nuevo;
+    if (data.visible !== undefined) campos.visible = data.visible;
+
+    if (Object.keys(campos).length === 0) return;
+    await client.producto.update({ where: { id }, data: campos });
+  },
+
+  /** Reemplazo completo del set de tallas (no merge). */
+  async reemplazarTallas(id: number, tallaIds: number[], client: Prisma.TransactionClient = prisma): Promise<void> {
+    await client.productoTalla.deleteMany({ where: { productoId: id } });
+    if (tallaIds.length) {
+      await client.productoTalla.createMany({ data: tallaIds.map((tallaId) => ({ productoId: id, tallaId })) });
+    }
+  },
+
+  /** Reemplazo completo del set de colores (no merge). */
+  async reemplazarColores(id: number, colorIds: number[], client: Prisma.TransactionClient = prisma): Promise<void> {
+    await client.productoColor.deleteMany({ where: { productoId: id } });
+    if (colorIds.length) {
+      await client.productoColor.createMany({ data: colorIds.map((colorId) => ({ productoId: id, colorId })) });
+    }
+  },
+
+  /** Reemplazo completo del set de materiales (no merge). */
+  async reemplazarMateriales(id: number, materialIds: number[], client: Prisma.TransactionClient = prisma): Promise<void> {
+    await client.productoMaterial.deleteMany({ where: { productoId: id } });
+    if (materialIds.length) {
+      await client.productoMaterial.createMany({ data: materialIds.map((materialId) => ({ productoId: id, materialId })) });
+    }
+  },
+
+  /** Reemplazo completo del set de tags (no merge). */
+  async reemplazarTags(id: number, tagIds: number[], client: Prisma.TransactionClient = prisma): Promise<void> {
+    await client.productoTag.deleteMany({ where: { productoId: id } });
+    if (tagIds.length) {
+      await client.productoTag.createMany({ data: tagIds.map((tagId) => ({ productoId: id, tagId })) });
+    }
+  },
+
+  /**
+   * Agrega imágenes nuevas al final de las existentes (append, no reemplaza).
+   * Si el producto todavía no tenía ninguna marcada como principal, la primera
+   * de las nuevas pasa a serlo; si ya tenía, se respeta la que ya existía.
+   */
+  async agregarImagenes(id: number, urls: string[], client: Prisma.TransactionClient = prisma): Promise<void> {
+    if (!urls.length) return;
+    const [agregado, principales] = await Promise.all([
+      client.productoImagen.aggregate({ where: { productoId: id }, _max: { orden: true } }),
+      client.productoImagen.count({ where: { productoId: id, esPrincipal: true } }),
+    ]);
+    const ordenInicial = (agregado._max.orden ?? -1) + 1;
+    await client.productoImagen.createMany({
+      data: urls.map((url, i) => ({
+        productoId: id,
+        url,
+        orden: ordenInicial + i,
+        esPrincipal: principales === 0 && i === 0,
+      })),
+    });
+  },
+
+  /**
+   * Actualiza un producto existente en una sola transacción: campos simples +
+   * reemplazo de los sets que vengan (tallas/colores/materiales/tags) + imágenes
+   * nuevas (append). Todo o nada, igual que crear().
+   */
+  async actualizar(
+    id: number,
+    data: ActualizarProductoInput,
+    calculados?: { precioFinal: Prisma.Decimal }
+  ): Promise<void> {
+    await prisma.$transaction(async (tx) => {
+      await this.actualizarEscalares(id, data, calculados?.precioFinal, tx);
+      if (data.tallaIds !== undefined) await this.reemplazarTallas(id, data.tallaIds, tx);
+      if (data.colorIds !== undefined) await this.reemplazarColores(id, data.colorIds, tx);
+      if (data.materialIds !== undefined) await this.reemplazarMateriales(id, data.materialIds, tx);
+      if (data.tagIds !== undefined) await this.reemplazarTags(id, data.tagIds, tx);
+      if (data.imagenesNuevas?.length) await this.agregarImagenes(id, data.imagenesNuevas, tx);
     });
   },
 

@@ -3,11 +3,13 @@ import { productoAdminController } from "../../controllers/admin/producto.contro
 import { authMiddleware } from "../../middlewares/auth.middleware";
 import { requireRole } from "../../middlewares/role.middleware";
 import { validate } from "../../middlewares/validate.middleware";
-import { crearProductoSchema } from "../../dtos/producto.dto";
+import { crearProductoSchema, actualizarProductoSchema } from "../../dtos/producto.dto";
 
 export const productoAdminRouter = Router();
 
 productoAdminRouter.use(authMiddleware, requireRole("admin", "editor"));
 
 productoAdminRouter.get("/", productoAdminController.listar);
+productoAdminRouter.get("/:id", productoAdminController.detalle);
 productoAdminRouter.post("/", validate(crearProductoSchema), productoAdminController.crear);
+productoAdminRouter.patch("/:id", validate(actualizarProductoSchema), productoAdminController.actualizar);

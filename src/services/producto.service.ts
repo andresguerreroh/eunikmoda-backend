@@ -2,7 +2,7 @@ import { Prisma } from "../generated/prisma/client";
 import { productoRepository, type ProductoFiltros } from "../repositories/producto.repository";
 import { construirSku, slugify } from "../utils/sku";
 import { ApiError } from "../utils/ApiError";
-import type { CrearProductoInput } from "../models/producto.types";
+import type { CrearProductoInput, ActualizarProductoInput } from "../models/producto.types";
 
 /**
  * precio_final ya no es una columna generada de MySQL: se calcula acá con la misma
@@ -86,5 +86,24 @@ export const productoService = {
         slug: `${slugify(input.nombre)}-${id}`,
       }),
     });
+  },
+
+  async actualizar(id: number, input: ActualizarProductoInput) {
+    const actual = await productoRepository.findParaEdicion(id);
+    if (!actual) throw ApiError.notFound("Producto no encontrado.");
+
+    // precioFinal depende de precio + tipoDescuento + valorDescuento juntos: si
+    // solo viene uno de los tres, se completa con lo que ya tenía el producto.
+    let precioFinal: Prisma.Decimal | undefined;
+    if (input.precio !== undefined || input.tipoDescuento !== undefined || input.valorDescuento !== undefined) {
+      precioFinal = calcularPrecioFinal(
+        input.precio ?? actual.precio,
+        input.tipoDescuento ?? actual.tipoDescuento,
+        input.valorDescuento ?? actual.valorDescuento ?? undefined
+      );
+    }
+
+    await productoRepository.actualizar(id, input, precioFinal ? { precioFinal } : undefined);
+    return { id };
   },
 };
